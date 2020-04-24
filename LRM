@@ -1,0 +1,46 @@
+#                    coding=utf-8                   ###
+#                 Local Relief Model                ###
+#                      Based on                     ###
+#          J. Bofinger and R. Hesse (2011)          ###
+#                   D. Novák (2014)                 ###
+#######################################################
+
+import arcpy
+from arcpy.sa import *
+
+arcpy.env.overwriteOutput = True
+arcpy.env.workspace = r'D:\Documents\LocalReliefModel\TestRaster'
+
+DEM_org = r"D:\Documents\LocalReliefModel\TestRaster\Kasteel.tif"
+
+# Low pass filter -> Smoothed DEM (focal statistics)
+outFocalStat = arcpy.sa.FocalStatistics(DEM_org, NbrRectangle(50, 50, "CELL"), 'MEAN')
+
+# Subtract smoothed DEM from the original DEM -> Difference model (Minus function)
+outMinus = arcpy.sa.Minus(DEM_org, outFocalStat)
+
+# Calculate the zero meters contours for the Difference model -> set of the break lines between the positive and negative features (convex and concave features; Contour function)
+outCont_save = r'D:\Documents\LocalReliefModel\TestRaster\ZeroCont.tif'
+outCont = arcpy.sa.Contour(outMinus, outCont_save, 100)
+
+# Extract the real elevation of the cells from the original DEM, which intersects with the break lines -> simplified elevation raster (Extract by Mask function)
+outMask = arcpy.sa.ExtractByMask(DEM_org, outCont)
+
+# Convert the simplified elevation raster to the point features (only nonzero cells) -> elevation points (Raster to Point function)
+outRastToPoint_save = r'D:\Documents\LocalReliefModel\TestRaster\RastToPoint'
+outRastToPoint = arcpy.RasterToPoint_conversion(outMask, outRastToPoint_save)
+
+# Create the simplified surface DEM from the elevation points -> computed digital terrain model (DTM; Create TIN and TIN to Raster functions).
+outTIN = arcpy.CreateTin_3d('SSDEM', in_features='RastToPoint.shp grid_code masspoints')
+DTM = arcpy.TinRaster_3d(outTIN, 'DTM.tif', sample_distance='CELLSIZE 0,5')
+
+#Subtract the DTM from the original DEM -> LRM (Minus function)
+LRM = arcpy.sa.Minus(DEM_org, DTM)
+
+# Save intermediates
+desc = arcpy.Describe(DEM_org)
+basenm = desc.baseName
+outFocalStat.save(r'D:\Documents\LocalReliefModel\TestRaster\LPF_{}.tif'.format(basenm))
+outMinus.save(r'D:\Documents\LocalReliefModel\TestRaster\DifModel_{}.tif'.format(basenm))
+outMask.save(r'D:\Documents\LocalReliefModel\TestRaster\ElExtract_{}.tif'.format(basenm))
+LRM.save(r'D:\Documents\LocalReliefModel\TestRaster\LRM_{}.tif'.format(basenm))
